@@ -7,12 +7,25 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		8170B54F30728BCB00C1E2C7 /* DeskPhone.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DeskPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8170B54F30728BCB00C1E2C7 /* NanoTower.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NanoTower.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		8170B563307293BA00C1E2C7 /* Exceptions for "DeskPhone" folder in "NanoTower" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 8170B54E30728BCB00C1E2C7 /* NanoTower */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8170B55130728BCB00C1E2C7 /* DeskPhone */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				8170B563307293BA00C1E2C7 /* Exceptions for "DeskPhone" folder in "NanoTower" target */,
+			);
 			path = DeskPhone;
 			sourceTree = "<group>";
 		};
@@ -40,7 +53,7 @@
 		8170B55030728BCB00C1E2C7 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				8170B54F30728BCB00C1E2C7 /* DeskPhone.app */,
+				8170B54F30728BCB00C1E2C7 /* NanoTower.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +61,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		8170B54E30728BCB00C1E2C7 /* DeskPhone */ = {
+		8170B54E30728BCB00C1E2C7 /* NanoTower */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8170B55A30728BCD00C1E2C7 /* Build configuration list for PBXNativeTarget "DeskPhone" */;
+			buildConfigurationList = 8170B55A30728BCD00C1E2C7 /* Build configuration list for PBXNativeTarget "NanoTower" */;
 			buildPhases = (
 				8170B54B30728BCB00C1E2C7 /* Sources */,
 				8170B54C30728BCB00C1E2C7 /* Frameworks */,
@@ -63,11 +76,11 @@
 			fileSystemSynchronizedGroups = (
 				8170B55130728BCB00C1E2C7 /* DeskPhone */,
 			);
-			name = DeskPhone;
+			name = NanoTower;
 			packageProductDependencies = (
 			);
 			productName = DeskPhone;
-			productReference = 8170B54F30728BCB00C1E2C7 /* DeskPhone.app */;
+			productReference = 8170B54F30728BCB00C1E2C7 /* NanoTower.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +98,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 8170B54A30728BCB00C1E2C7 /* Build configuration list for PBXProject "DeskPhone" */;
+			buildConfigurationList = 8170B54A30728BCB00C1E2C7 /* Build configuration list for PBXProject "NanoTower" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +112,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				8170B54E30728BCB00C1E2C7 /* DeskPhone */,
+				8170B54E30728BCB00C1E2C7 /* NanoTower */,
 			);
 		};
 /* End PBXProject section */
@@ -313,7 +326,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		8170B54A30728BCB00C1E2C7 /* Build configuration list for PBXProject "DeskPhone" */ = {
+		8170B54A30728BCB00C1E2C7 /* Build configuration list for PBXProject "NanoTower" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8170B55830728BCD00C1E2C7 /* Debug */,
@@ -322,7 +335,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		8170B55A30728BCD00C1E2C7 /* Build configuration list for PBXNativeTarget "DeskPhone" */ = {
+		8170B55A30728BCD00C1E2C7 /* Build configuration list for PBXNativeTarget "NanoTower" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8170B55B30728BCD00C1E2C7 /* Debug */,

@@ -2,13 +2,8 @@ import SwiftUI
 import UIKit
 import AVKit
 import Combine
-// MARK: - Shared state (survives disconnect/reconnect)
 
-final class DesktopState: ObservableObject {
-    static let shared = DesktopState()
-    @Published var windows: [String] = []
-    private init() {}
-}
+// MARK: - Display state
 
 final class DisplayManager: ObservableObject {
     static let shared = DisplayManager()
@@ -17,35 +12,51 @@ final class DisplayManager: ObservableObject {
     private init() {}
 }
 
-// MARK: - App delegate + external scene
+// MARK: - External window creation
+
+enum ExternalWindowFactory {
+    static func make(for scene: UIWindowScene) -> UIWindow {
+        let size = scene.screen.bounds.size
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: DesktopView())
+        host.view.backgroundColor = .black
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+
+        DisplayManager.shared.isConnected = true
+        DisplayManager.shared.size = size
+        Desktop.shared.setScreen(size)
+        return window
+    }
+}
+
+// MARK: - App delegate
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     var fallbackWindow: UIWindow?
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        InputManager.shared.start()
+
         NotificationCenter.default.addObserver(
             forName: UIScene.willConnectNotification, object: nil, queue: .main
         ) { [weak self] note in
-            guard let scene = note.object as? UIWindowScene else { return }
-            print("SCENE willConnect, role:", scene.session.role.rawValue)
-            guard scene.session.role == .windowExternalDisplayNonInteractive else { return }
-
-            // Give the normal delegate a moment; only build a window if it didn't
+            guard let scene = note.object as? UIWindowScene,
+                  scene.session.role == .windowExternalDisplayNonInteractive else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 guard !DisplayManager.shared.isConnected else { return }
-                print("FALLBACK: building external window manually")
-                let window = UIWindow(windowScene: scene)
-                window.rootViewController = UIHostingController(
-                    rootView: DesktopView()
-                        .environmentObject(DesktopState.shared)
-                        .environmentObject(DisplayManager.shared)
-                )
-                window.makeKeyAndVisible()
-                self?.fallbackWindow = window
-                DisplayManager.shared.isConnected = true
-                DisplayManager.shared.size = scene.screen.bounds.size
+                self?.fallbackWindow = ExternalWindowFactory.make(for: scene)
             }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: UIScene.didDisconnectNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let scene = note.object as? UIWindowScene,
+                  scene.session.role == .windowExternalDisplayNonInteractive else { return }
+            DisplayManager.shared.isConnected = false
+            self?.fallbackWindow = nil
         }
         return true
     }
@@ -53,7 +64,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      configurationForConnecting session: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-        print("CONFIG requested, role:", session.role.rawValue)
         if session.role == .windowExternalDisplayNonInteractive {
             let config = UISceneConfiguration(name: "External", sessionRole: session.role)
             config.delegateClass = ExternalSceneDelegate.self
@@ -69,23 +79,12 @@ class ExternalSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
                options: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
-        let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = UIHostingController(
-            rootView: DesktopView()
-                .environmentObject(DesktopState.shared)
-                .environmentObject(DisplayManager.shared)
-        )
-        window.makeKeyAndVisible()
-        self.window = window
-
-        DisplayManager.shared.isConnected = true
-        DisplayManager.shared.size = windowScene.screen.bounds.size
+        window = ExternalWindowFactory.make(for: windowScene)
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
         window = nil
         DisplayManager.shared.isConnected = false
-        // DesktopState.shared is untouched, so windows come back on reconnect
     }
 }
 
@@ -100,28 +99,4 @@ struct AirPlayButton: UIViewRepresentable {
         return v
     }
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
-}
-
-// MARK: - External display UI
-
-struct DesktopView: View {
-    @EnvironmentObject var state: DesktopState
-
-    var body: some View {
-        ZStack {
-            LinearGradient(colors: [.indigo, .black],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
-            VStack(spacing: 16) {
-                Text("DeskPhone").font(.system(size: 64, weight: .bold))
-                TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                    Text(ctx.date, style: .time).font(.system(size: 32))
-                }
-                Text("Windows: \(state.windows.count)")
-                    .font(.title2).opacity(0.7)
-                ForEach(state.windows, id: \.self) { Text("• \($0)") }
-            }
-            .foregroundStyle(.white)
-        }
-    }
 }

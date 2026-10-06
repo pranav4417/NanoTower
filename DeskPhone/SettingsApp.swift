@@ -131,7 +131,7 @@ struct SettingsView: View {
 
     // MARK: Display
 
-    private var displayTab: some View {
+    @ViewBuilder private var displayTab: some View {
         section("Interface scale") {
             HStack(spacing: 8) {
                 chip("−") { desktop.stepScale(-0.1) }
@@ -142,6 +142,19 @@ struct SettingsView: View {
             }
             hint(s.scale == 0 ? "Auto picks a comfortable, readable size for this display."
                               : "Custom scale. Choose Auto to restore the recommended size.")
+        }
+        section("Dock") {
+            HStack(spacing: 8) {
+                chip("Magnify icons: \(s.dockZoom ? "On" : "Off")", selected: s.dockZoom) { s.dockZoom.toggle() }
+                chip("Auto-hide: \(s.dockAutoHide ? "On" : "Off")", selected: s.dockAutoHide) { s.dockAutoHide.toggle() }
+            }
+            hint("With auto-hide, push the pointer to the bottom edge to bring the dock back.")
+        }
+        section("Scrolling") {
+            HStack(spacing: 8) {
+                chip("Natural scrolling: \(s.naturalScroll ? "On" : "Off")", selected: s.naturalScroll) { s.naturalScroll.toggle() }
+            }
+            hint("Same direction for the iPhone trackpad and a mouse wheel.")
         }
     }
 

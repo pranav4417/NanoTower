@@ -90,6 +90,10 @@ final class InputManager: ObservableObject {
             case .keyQ: d.quitFocusedApp()
             case .keyC: d.copy()
             case .keyV: d.paste()
+            case .keyT: d.command("t")
+            case .keyL: d.command("l")
+            case .keyR: d.command("r")
+            case .keyD: d.command("d")
             default: break
             }
             return

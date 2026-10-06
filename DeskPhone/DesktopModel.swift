@@ -37,16 +37,21 @@ class AppModel: ObservableObject {
     func contentClick(_ p: CGPoint) {}      // p is relative to the area below the title bar
     func scroll(_ dy: CGFloat) {}           // positive = scroll content down
     func copyText() -> String? { nil }
+    func hover(_ p: CGPoint) {}             // pointer moved over the content area (relative to below the title bar)
+    func command(_ key: String) {}          // Cmd+<letter>
+    func handleClose() -> Bool { false }    // return true to swallow Cmd+W (e.g. close a tab instead)
 }
 
 enum AppKind: String, CaseIterable, Identifiable {
-    case browser, files, terminal, notes, calculator, settings
+    case browser, files, video, audio, terminal, notes, calculator, settings
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .browser: return "Browser"
         case .files: return "Files"
+        case .video: return "Videos"
+        case .audio: return "Music"
         case .terminal: return "Terminal"
         case .notes: return "Notes"
         case .calculator: return "Calculator"
@@ -57,6 +62,8 @@ enum AppKind: String, CaseIterable, Identifiable {
         switch self {
         case .browser: return "globe"
         case .files: return "folder.fill"
+        case .video: return "play.rectangle.fill"
+        case .audio: return "waveform"
         case .terminal: return "terminal.fill"
         case .notes: return "note.text"
         case .calculator: return "plus.forwardslash.minus"
@@ -67,6 +74,8 @@ enum AppKind: String, CaseIterable, Identifiable {
         switch self {
         case .browser: return .blue
         case .files: return .cyan
+        case .video: return .purple
+        case .audio: return Color(red: 0.78, green: 0.6, blue: 0.28)
         case .terminal: return Color(white: 0.2)
         case .notes: return .yellow
         case .calculator: return .orange
@@ -75,8 +84,10 @@ enum AppKind: String, CaseIterable, Identifiable {
     }
     var size: CGSize {
         switch self {
-        case .browser: return CGSize(width: 960, height: 600)
-        case .files: return CGSize(width: 760, height: 480)
+        case .browser: return CGSize(width: 1000, height: 620)
+        case .files: return CGSize(width: 800, height: 480)
+        case .video: return CGSize(width: 800, height: 470)
+        case .audio: return CGSize(width: 460, height: 590)
         case .terminal: return CGSize(width: 640, height: 400)
         case .notes: return CGSize(width: 560, height: 420)
         case .calculator: return CGSize(width: 320, height: 460)
@@ -87,6 +98,8 @@ enum AppKind: String, CaseIterable, Identifiable {
         switch self {
         case .browser: return BrowserModel()
         case .files: return FilesModel()
+        case .video: return VideoModel()
+        case .audio: return AudioModel()
         case .terminal: return TerminalModel()
         case .notes: return NotesModel()
         case .calculator: return CalcModel()
@@ -172,9 +185,35 @@ struct ClickableModifier: ViewModifier {
     }
 }
 
+/// Like `clickable`, but reports where inside the view the pointer was (0...1 on both axes).
+struct ClickableAtModifier: ViewModifier {
+    @Environment(\.winID) private var winID
+    @State private var id = UUID()
+    let action: (CGPoint) -> Void
+
+    func body(content: Content) -> some View {
+        content.background(
+            GeometryReader { g in
+                let f = g.frame(in: .named("desk"))
+                Color.clear.preference(
+                    key: HotspotKey.self,
+                    value: [Hotspot(id: id, window: winID, frame: f, action: {
+                        let p = Desktop.shared.cursor.pos
+                        action(CGPoint(x: min(max((p.x - f.minX) / max(f.width, 1), 0), 1),
+                                       y: min(max((p.y - f.minY) / max(f.height, 1), 0), 1)))
+                    })]
+                )
+            }
+        )
+    }
+}
+
 extension View {
     func clickable(_ action: @escaping () -> Void) -> some View {
         modifier(ClickableModifier(action: action))
+    }
+    func clickableAt(_ action: @escaping (CGPoint) -> Void) -> some View {
+        modifier(ClickableAtModifier(action: action))
     }
 }
 
@@ -199,6 +238,7 @@ final class Desktop: ObservableObject {
     @Published var fullscreenWin: Win?
     @Published var uiScale: CGFloat = 1.0
     @Published var showOnScreenKeyboard = false
+    @Published var dockVisible = true
     @Published var launcherOpen = false
     @Published var launcherQuery = ""
     @Published var menuPoint: CGPoint?
@@ -217,6 +257,7 @@ final class Desktop: ObservableObject {
     private var lastTitleClick: (UUID, Date)?
     private var didWelcome = false
     private var didCenter = false
+    private var hideWork: DispatchWorkItem?
 
     private init() {
         UIDevice.current.isBatteryMonitoringEnabled = true
@@ -287,9 +328,10 @@ final class Desktop: ObservableObject {
     }
 
     var usableRect: CGRect {
-        CGRect(x: 0, y: Metrics.menuBar,
-               width: screen.width,
-               height: screen.height - Metrics.menuBar - Metrics.dockSpace)
+        let bottom: CGFloat = Settings.shared.dockAutoHide ? 12 : Metrics.dockSpace
+        return CGRect(x: 0, y: Metrics.menuBar,
+                      width: screen.width,
+                      height: screen.height - Metrics.menuBar - bottom)
     }
 
     var focusedWindow: Win? { windows.first { $0.id == focusedID } }
@@ -347,7 +389,8 @@ final class Desktop: ObservableObject {
 
     // MARK: Window management
 
-    func launch(_ kind: AppKind) {
+    @discardableResult
+    func launch(_ kind: AppKind) -> Win {
         let n = CGFloat(windows.count % 6)
         var size = kind.size
         size.width = min(size.width, screen.width - 80)
@@ -356,6 +399,7 @@ final class Desktop: ObservableObject {
         let w = Win(kind: kind, frame: fit(CGRect(origin: origin, size: size)))
         windows.append(w)
         focusedID = w.id
+        return w
     }
 
     func focus(_ w: Win) {
@@ -435,7 +479,29 @@ final class Desktop: ObservableObject {
         }
     }
 
-    func closeFocused() { if let w = focusedWindow { close(w) } }
+    func closeFocused() {
+        guard let w = focusedWindow else { return }
+        if w.model.handleClose() { return }
+        close(w)
+    }
+    func command(_ key: String) { focusedWindow?.model.command(key) }
+
+    /// Open a media file in the right app
+    func openMedia(_ url: URL, playlist: [URL] = []) {
+        guard let kind = MediaTypes.kind(url) else { return }
+        switch kind {
+        case .video:
+            let w = windows.last(where: { $0.kind == .video }) ?? launch(.video)
+            focus(w)
+            (w.model as? VideoModel)?.play(url, queue: playlist)
+        case .audio:
+            let w = windows.last(where: { $0.kind == .audio }) ?? launch(.audio)
+            focus(w)
+            (w.model as? AudioModel)?.play(url, queue: playlist)
+        case .image:
+            break
+        }
+    }
     func minimizeFocused() { if let w = focusedWindow { minimize(w) } }
     func quitFocusedApp() {
         guard let kind = focusedWindow?.kind else { return }
@@ -512,7 +578,8 @@ final class Desktop: ObservableObject {
         let k = CGFloat(Settings.shared.trackingSpeed) / uiScale
         let p = clamp(CGPoint(x: cursor.pos.x + dx * k, y: cursor.pos.y + dy * k))
         cursor.pos = p
-        guard let drag else { return }
+        updateDock(p)
+        guard let drag else { hover(at: p); return }
         switch drag {
         case .move(let w, let off):
             w.frame.origin = CGPoint(x: p.x - off.width, y: max(Metrics.menuBar, p.y - off.height))
@@ -522,6 +589,44 @@ final class Desktop: ObservableObject {
             if bottom { f.size.height = max(160, start.height + p.y - startP.y) }
             w.frame = f
         }
+    }
+
+    // MARK: Dock auto-hide
+
+    func dockModeChanged() {
+        hideWork?.cancel()
+        dockVisible = true
+        for w in windows where w.maximized && !w.fullscreen {
+            w.frame = CGRect(x: w.frame.minX, y: usableRect.minY, width: w.frame.width, height: usableRect.height)
+        }
+    }
+
+    private func updateDock(_ p: CGPoint) {
+        guard Settings.shared.dockAutoHide else {
+            if !dockVisible { dockVisible = true }
+            return
+        }
+        if p.y >= screen.height - 6 {
+            hideWork?.cancel()
+            if !dockVisible { dockVisible = true }
+        } else if p.y < screen.height - 118, dockVisible, hideWork == nil {
+            let work = DispatchWorkItem { [weak self] in
+                self?.dockVisible = false
+                self?.hideWork = nil
+            }
+            hideWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        } else if p.y >= screen.height - 118 {
+            hideWork?.cancel()
+            hideWork = nil
+        }
+    }
+
+    private func hover(at p: CGPoint) {
+        guard !launcherOpen, menuPoint == nil, let w = topWindow(at: p), w.frame.contains(p) else { return }
+        let tb: CGFloat = w.fullscreen ? 0 : Metrics.titleBar
+        let lp = CGPoint(x: p.x - w.frame.minX, y: p.y - w.frame.minY - tb)
+        if lp.y >= 0 { w.model.hover(lp) }
     }
 
     func click() { leftDown(); leftUp() }
@@ -612,7 +717,9 @@ final class Desktop: ObservableObject {
         menuPoint = topWindow(at: p) == nil ? p : nil
     }
 
-    func scroll(_ dy: CGFloat) {
+    /// `motion`: positive = fingers (or wheel) moved DOWN. Natural scrolling makes the content follow them.
+    func scroll(_ motion: CGFloat) {
+        let dy = Settings.shared.naturalScroll ? -motion : motion
         topWindow(at: cursor.pos)?.model.scroll(dy)
     }
 }

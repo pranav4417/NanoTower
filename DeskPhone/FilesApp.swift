@@ -13,12 +13,12 @@ enum FileStore {
     static func seed() {
         let fm = FileManager.default
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
-        for d in ["Documents", "Pictures", "Downloads"] {
+        for d in ["Documents", "Pictures", "Videos", "Music", "Downloads"] {
             try? fm.createDirectory(at: root.appendingPathComponent(d), withIntermediateDirectories: true)
         }
         let welcome = root.appendingPathComponent("Documents/Welcome.txt")
         if !fm.fileExists(atPath: welcome.path) {
-            try? "Welcome to NanoTower Files.\n\nSelect an item and use the toolbar to rename or delete.\nOpen an image and choose Set as wallpaper.\n"
+            try? "Welcome to NanoTower Files.\n\nDouble-click to open. Music and videos open in their players.\nAdd folders from your iPhone in Settings → Files on the phone.\n"
                 .write(to: welcome, atomically: true, encoding: .utf8)
         }
     }
@@ -34,7 +34,8 @@ final class FilesModel: AppModel {
         let date: Date
         var id: URL { url }
         var name: String { url.lastPathComponent }
-        var isImage: Bool { ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains(url.pathExtension.lowercased()) }
+        var media: MediaKind? { isDir ? nil : MediaTypes.kind(url) }
+        var isImage: Bool { media == .image }
     }
     enum Prompt { case folder, file, rename(URL) }
 
@@ -62,12 +63,15 @@ final class FilesModel: AppModel {
         reload()
     }
 
+    var root: Root { RootsStore.shared.root(containing: cwd) }
     var inViewer: Bool { editURL != nil || image != nil }
     var selectedItem: Item? { items.first { $0.url == selected } }
+    var atRoot: Bool { cwd.path == root.url.path }
 
     var crumbs: String {
-        let rel = cwd.path.replacingOccurrences(of: FileStore.root.path, with: "")
-        return rel.isEmpty ? "Home" : "Home" + rel.replacingOccurrences(of: "/", with: "  ›  ")
+        let r = root
+        let rel = cwd.path.replacingOccurrences(of: r.url.path, with: "")
+        return rel.isEmpty ? r.name : r.name + "  ›  " + rel.dropFirst().replacingOccurrences(of: "/", with: "  ›  ")
     }
 
     func reload() {
@@ -93,12 +97,11 @@ final class FilesModel: AppModel {
         top = 0
         prompt = nil
         confirmDelete = false
+        note = nil
         reload()
     }
 
-    func up() {
-        if cwd.path != FileStore.root.path { go(to: cwd.deletingLastPathComponent()) }
-    }
+    func up() { if !atRoot { go(to: cwd.deletingLastPathComponent()) } }
 
     func click(_ it: Item) {
         if let l = lastClick, l.0 == it.url, Date().timeIntervalSince(l.1) < 0.5 {
@@ -113,8 +116,14 @@ final class FilesModel: AppModel {
     func open(_ it: Item) {
         note = nil
         if it.isDir { go(to: it.url); return }
-        if it.isImage, let img = UIImage(contentsOfFile: it.url.path) {
-            image = img; imageURL = it.url; return
+        switch it.media {
+        case .audio?, .video?:
+            let same = items.filter { $0.media == it.media }.map { $0.url }
+            Desktop.shared.openMedia(it.url, playlist: same)
+            return
+        case .image?:
+            if let img = UIImage(contentsOfFile: it.url.path) { image = img; imageURL = it.url; return }
+        default: break
         }
         if let s = try? String(contentsOf: it.url, encoding: .utf8) {
             text = s          // set before editURL so we don't rewrite the file
@@ -130,16 +139,7 @@ final class FilesModel: AppModel {
         if let img = image { Settings.shared.setCustomWallpaper(img); note = "Wallpaper updated" }
     }
 
-    private func unique(_ name: String) -> URL {
-        var u = cwd.appendingPathComponent(name)
-        var n = 2
-        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
-        while FileManager.default.fileExists(atPath: u.path) {
-            u = cwd.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
-            n += 1
-        }
-        return u
-    }
+    private func unique(_ name: String) -> URL { Importer.unique(cwd, name) }
 
     func begin(_ p: Prompt) {
         switch p {
@@ -244,10 +244,11 @@ final class FilesModel: AppModel {
 
 struct FilesView: View {
     @ObservedObject var model: FilesModel
+    @ObservedObject private var roots = RootsStore.shared
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 150)
+            sidebar.frame(width: 170)
             VStack(spacing: 0) {
                 toolbar
                 if let p = model.prompt { promptBar(p) }
@@ -266,13 +267,20 @@ struct FilesView: View {
     // MARK: Sidebar
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("FAVORITES").font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
-                .padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: 3) {
+            header("FAVORITES")
             side("house.fill", "Home", FileStore.root)
             side("doc.fill", "Documents", FileStore.root.appendingPathComponent("Documents"))
             side("photo.fill", "Pictures", FileStore.root.appendingPathComponent("Pictures"))
+            side("film.fill", "Videos", FileStore.root.appendingPathComponent("Videos"))
+            side("music.note", "Music", FileStore.root.appendingPathComponent("Music"))
             side("arrow.down.circle.fill", "Downloads", FileStore.root.appendingPathComponent("Downloads"))
+            header("ON YOUR iPHONE").padding(.top, 10)
+            ForEach(roots.external) { r in side("folder.fill", r.name, r.url) }
+            if roots.external.isEmpty {
+                Text("Add folders in Settings on the iPhone")
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4)).padding(.horizontal, 4)
+            }
             Spacer()
         }
         .padding(12)
@@ -280,11 +288,15 @@ struct FilesView: View {
         .background(Color(white: 0.15))
     }
 
+    private func header(_ t: String) -> some View {
+        Text(t).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.4)).padding(.bottom, 2)
+    }
+
     private func side(_ icon: String, _ title: String, _ url: URL) -> some View {
         let on = model.cwd.path == url.path
         return HStack(spacing: 8) {
             Image(systemName: icon).foregroundStyle(.cyan).frame(width: 20)
-            Text(title).font(.system(size: 14))
+            Text(title).font(.system(size: 14)).lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 8)
@@ -298,7 +310,7 @@ struct FilesView: View {
     private var toolbar: some View {
         HStack(spacing: 8) {
             pill(model.inViewer ? "chevron.left" : "arrow.up", nil,
-                 enabled: model.inViewer || model.cwd.path != FileStore.root.path) {
+                 enabled: model.inViewer || !model.atRoot) {
                 if model.inViewer { model.closeViewer(); model.reload() } else { model.up() }
             }
             Text(model.inViewer ? (model.editURL ?? model.imageURL)?.lastPathComponent ?? "" : model.crumbs)
@@ -398,12 +410,21 @@ struct FilesView: View {
         .clipped()
     }
 
+    private func icon(_ it: FilesModel.Item) -> (String, Color) {
+        if it.isDir { return ("folder.fill", .yellow) }
+        switch it.media {
+        case .audio?: return ("music.note", .green)
+        case .video?: return ("play.rectangle.fill", .purple)
+        case .image?: return ("photo", .pink)
+        case nil: return ("doc.text", .cyan)
+        }
+    }
+
     private func row(_ it: FilesModel.Item) -> some View {
         let on = model.selected == it.url
+        let ic = icon(it)
         return HStack(spacing: 10) {
-            Image(systemName: it.isDir ? "folder.fill" : (it.isImage ? "photo" : "doc.text"))
-                .foregroundStyle(it.isDir ? Color.yellow : (it.isImage ? Color.pink : Color.cyan))
-                .frame(width: 22)
+            Image(systemName: ic.0).foregroundStyle(ic.1).frame(width: 22)
             Text(it.name).font(.system(size: 14)).lineLimit(1)
             Spacer()
             Text(it.isDir ? "—" : ByteCountFormatter.string(fromByteCount: it.size, countStyle: .file))

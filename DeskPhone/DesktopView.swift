@@ -113,6 +113,8 @@ struct AppContent: View {
         case .browser: BrowserView(model: win.model as! BrowserModel)
         case .calculator: CalculatorView(model: win.model as! CalcModel)
         case .files: FilesView(model: win.model as! FilesModel)
+        case .video: VideoView(model: win.model as! VideoModel)
+        case .audio: AudioView(model: win.model as! AudioModel)
         case .terminal: TerminalView(model: win.model as! TerminalModel)
         case .settings: SettingsView(model: win.model as! SettingsModel)
         }
@@ -167,15 +169,31 @@ struct BatteryTimeStatusView: View {
 
 struct DockView: View {
     @ObservedObject var desktop: Desktop
+    @ObservedObject private var cursor = Desktop.shared.cursor
+    @ObservedObject private var settings = Settings.shared
+
+    private var itemCount: Int { AppKind.allCases.count + 1 }
+    private var totalWidth: CGFloat { CGFloat(itemCount) * 56 + CGFloat(itemCount - 1) * 16 + 36 }
+    private var hidden: Bool { settings.dockAutoHide && !desktop.dockVisible }
+
+    /// macOS-style magnification based on how close the pointer is to each icon
+    private func zoom(_ i: Int) -> CGFloat {
+        guard settings.dockZoom else { return 1 }
+        let c = cursor.pos
+        guard c.y > desktop.screen.height - 135 else { return 1 }
+        let cx = desktop.screen.width / 2 - totalWidth / 2 + 18 + 28 + CGFloat(i) * 72
+        let t = max(0, 1 - abs(c.x - cx) / 130)
+        return 1 + 0.75 * t * t * (3 - 2 * t)
+    }
 
     var body: some View {
         VStack {
             Spacer()
             HStack(spacing: 16) {
-                ForEach(AppKind.allCases) { kind in
-                    dockItem(for: kind)
+                ForEach(Array(AppKind.allCases.enumerated()), id: \.element.id) { i, kind in
+                    dockItem(kind, i)
                 }
-                launcherButton
+                launcherButton(AppKind.allCases.count)
             }
             .padding(.horizontal, 18)
             .padding(.top, 12)
@@ -185,9 +203,11 @@ struct DockView: View {
             .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity)
+        .offset(y: hidden ? 160 : 0)
+        .animation(.easeInOut(duration: 0.25), value: hidden)
     }
 
-    private func dockItem(for kind: AppKind) -> some View {
+    private func dockItem(_ kind: AppKind, _ i: Int) -> some View {
         VStack(spacing: 4) {
             Image(systemName: kind.icon)
                 .font(.system(size: 28))
@@ -199,10 +219,12 @@ struct DockView: View {
                 .frame(width: 5, height: 5)
                 .opacity(desktop.windows.contains(where: { $0.kind == kind }) ? 1 : 0)
         }
+        .scaleEffect(zoom(i), anchor: .bottom)
+        .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.72), value: zoom(i))
         .clickable { desktop.dockClick(kind) }
     }
 
-    private var launcherButton: some View {
+    private func launcherButton(_ i: Int) -> some View {
         VStack(spacing: 4) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 24))
@@ -211,6 +233,8 @@ struct DockView: View {
                 .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.15)))
             Circle().fill(Color.clear).frame(width: 5, height: 5)
         }
+        .scaleEffect(zoom(i), anchor: .bottom)
+        .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.72), value: zoom(i))
         .clickable { desktop.toggleLauncher() }
     }
 }

@@ -3,6 +3,7 @@ import UIKit
 import WebKit
 import PhotosUI
 import Combine
+import UniformTypeIdentifiers
 
 // MARK: - Option types
 
@@ -124,6 +125,18 @@ final class Settings: ObservableObject {
             NotificationCenter.default.post(name: .browserPrefsChanged, object: nil)
         }
     }
+    @Published var naturalScroll: Bool = true {
+        didSet { UserDefaults.standard.set(naturalScroll, forKey: "nt.natural") }
+    }
+    @Published var dockZoom: Bool = true {
+        didSet { UserDefaults.standard.set(dockZoom, forKey: "nt.dockZoom") }
+    }
+    @Published var dockAutoHide: Bool = false {
+        didSet {
+            UserDefaults.standard.set(dockAutoHide, forKey: "nt.dockHide")
+            if ready { Desktop.shared.dockModeChanged() }
+        }
+    }
     @Published var blackout = false {
         didSet { if oldValue != blackout { applyBlackout() } }
     }
@@ -147,6 +160,9 @@ final class Settings: ObservableObject {
         homepage = d.string(forKey: "nt.home") ?? "duckduckgo.com"
         searchEngine = SearchEngine(rawValue: d.string(forKey: "nt.engine") ?? "") ?? .duckduckgo
         if d.object(forKey: "nt.desktop") != nil { requestDesktop = d.bool(forKey: "nt.desktop") }
+        if d.object(forKey: "nt.natural") != nil { naturalScroll = d.bool(forKey: "nt.natural") }
+        if d.object(forKey: "nt.dockZoom") != nil { dockZoom = d.bool(forKey: "nt.dockZoom") }
+        if d.object(forKey: "nt.dockHide") != nil { dockAutoHide = d.bool(forKey: "nt.dockHide") }
         customWallpaper = UIImage(contentsOfFile: Settings.wallpaperURL.path)
         if customWallpaper == nil && wallpaper < 0 { wallpaper = 0 }
         ready = true
@@ -211,6 +227,8 @@ final class Settings: ObservableObject {
         if let id = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: id)
         }
+        RootsStore.shared.external.forEach { $0.url.stopAccessingSecurityScopedResource() }
+        RootsStore.shared.external = []
         try? FileManager.default.removeItem(at: Settings.wallpaperURL)
         try? FileManager.default.removeItem(at: FileStore.root)
         FileStore.seed()
@@ -224,6 +242,9 @@ final class Settings: ObservableObject {
         homepage = "duckduckgo.com"
         searchEngine = .duckduckgo
         requestDesktop = true
+        naturalScroll = true
+        dockZoom = true
+        dockAutoHide = false
         scale = 0
         Desktop.shared.reset()
     }
@@ -238,6 +259,11 @@ struct SettingsSheet: View {
     @State private var photo: PhotosPickerItem?
     @State private var confirmReset = false
     @State private var cleared = false
+    @ObservedObject private var roots = RootsStore.shared
+    @State private var showImporter = false
+    @State private var importMode = ImportMode.folder
+    @State private var picks: [PhotosPickerItem] = []
+    @State private var importNote: String?
 
     var body: some View {
         NavigationStack {
@@ -245,6 +271,7 @@ struct SettingsSheet: View {
                 displaySection
                 pointerSection
                 wallpaperSection
+                filesSection
                 browserSection
                 screenSection
                 resetSection
@@ -252,8 +279,61 @@ struct SettingsSheet: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .fileImporter(isPresented: $showImporter,
+                          allowedContentTypes: importMode == .folder ? [.folder] : [.item],
+                          allowsMultipleSelection: importMode == .files) { result in
+                guard case .success(let urls) = result else { return }
+                if importMode == .folder {
+                    urls.forEach { roots.add($0) }
+                    importNote = "Folder added. It now shows in Files, Music and Videos."
+                } else {
+                    importNote = "Imported \(Importer.copy(urls)) file(s)."
+                }
+            }
+            .onChange(of: picks) { items in
+                guard !items.isEmpty else { return }
+                Task { await importPhotos(items) }
+            }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private func importPhotos(_ items: [PhotosPickerItem]) async {
+        var n = 0
+        for it in items {
+            if (try? await it.loadTransferable(type: MovieFile.self)) != nil { n += 1; continue }
+            if let d = try? await it.loadTransferable(type: Data.self), Importer.saveImage(d) { n += 1 }
+        }
+        importNote = "Imported \(n) item(s) from Photos."
+        picks = []
+    }
+
+    // MARK: Files
+
+    private var filesSection: some View {
+        Section {
+            Button { importMode = .folder; showImporter = true } label: {
+                Label("Add iPhone folder…", systemImage: "folder.badge.plus")
+            }
+            ForEach(roots.external) { r in
+                HStack {
+                    Image(systemName: "folder.fill").foregroundStyle(.cyan)
+                    Text(r.name)
+                    Spacer()
+                    Button(role: .destructive) { roots.remove(r) } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                }
+            }
+            Button { importMode = .files; showImporter = true } label: {
+                Label("Import files…", systemImage: "square.and.arrow.down")
+            }
+            PhotosPicker(selection: $picks, matching: .any(of: [.images, .videos])) {
+                Label("Import photos & videos…", systemImage: "photo.on.rectangle.angled")
+            }
+            if let n = importNote { Text(n).font(.footnote).foregroundStyle(.secondary) }
+        } header: { Text("Files") } footer: {
+            Text("iOS only lets an app see folders you choose. Add Downloads, iCloud Drive, a Music folder… and they appear in Files, Music and Videos on the big screen.")
+        }
     }
 
     // MARK: Display
@@ -273,6 +353,8 @@ struct SettingsSheet: View {
                                       set: { s.scale = ($0 * 10).rounded() / 10 }),
                        in: 0.7...2.5, step: 0.1)
             }
+            Toggle("Magnify dock icons", isOn: $s.dockZoom)
+            Toggle("Auto-hide dock", isOn: $s.dockAutoHide)
         } header: { Text("Display") } footer: {
             Text(s.scale == 0
                  ? "Auto picks a comfortable size for the connected display (now \(Int((desktop.uiScale * 100).rounded()))%)."
@@ -284,6 +366,7 @@ struct SettingsSheet: View {
 
     private var pointerSection: some View {
         Section("Pointer") {
+            Toggle("Natural scrolling (trackpad and mouse)", isOn: $s.naturalScroll)
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("Tracking speed")

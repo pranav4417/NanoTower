@@ -223,6 +223,7 @@ struct TrackpadView: UIViewRepresentable {
         let threeTap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.threeTap))
         threeTap.numberOfTouchesRequired = 3
 
+        c.holdG = hold
         [hold, pan, scroll, tap, rightTap, threeTap].forEach { v.addGestureRecognizer($0) }
         return v
     }
@@ -234,28 +235,43 @@ struct TrackpadView: UIViewRepresentable {
     final class Coordinator: NSObject {
         var onThree: (() -> Void)?
         var last: CGPoint = .zero
+        var scrolling = false
+        weak var holdG: UILongPressGestureRecognizer?
         init(_ onThree: (() -> Void)?) { self.onThree = onThree }
 
         @objc func pan(_ g: UIPanGestureRecognizer) {
             let t = g.translation(in: g.view)
             g.setTranslation(.zero, in: g.view)
+            guard !scrolling, g.numberOfTouches <= 1 else { return }
             let k = 1.6 + min(hypot(t.x, t.y) / 8, 2.4)     // simple acceleration
             Desktop.shared.mouseMoved(dx: t.x * k, dy: t.y * k)
         }
 
         @objc func scroll(_ g: UIPanGestureRecognizer) {
+            switch g.state {
+            case .began:
+                // Two fingers = scroll. Make sure a half-started hold-and-drag can't move windows.
+                scrolling = true
+                if let h = holdG { h.isEnabled = false; h.isEnabled = true }
+                Desktop.shared.leftUp()
+            case .ended, .cancelled, .failed:
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.scrolling = false }
+            default: break
+            }
             let t = g.translation(in: g.view)
             g.setTranslation(.zero, in: g.view)
-            Desktop.shared.scroll(-t.y * 1.5)
+            if g.state == .changed { Desktop.shared.scroll(t.y * 1.5) }   // finger motion; direction handled in one place
         }
 
         @objc func hold(_ g: UILongPressGestureRecognizer) {
             let p = g.location(in: g.view)
             switch g.state {
             case .began:
+                guard !scrolling, g.numberOfTouches == 1 else { return }
                 last = p
                 Desktop.shared.leftDown()
             case .changed:
+                guard !scrolling, g.numberOfTouches == 1 else { return }
                 Desktop.shared.mouseMoved(dx: (p.x - last.x) * 2, dy: (p.y - last.y) * 2)
                 last = p
             case .ended, .cancelled, .failed:
